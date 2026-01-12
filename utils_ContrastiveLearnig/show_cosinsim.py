@@ -1,41 +1,45 @@
+"""
+Visualization of cosine similarity matrices from contrastive learning models.
+
+Generates heatmap images of similarity scores between gestures and point cloud parts.
+"""
+
 from __future__ import print_function
 import argparse
-import numpy as np
-import torch
-import torch.nn.parallel
-import torch.utils.data
-from torch.autograd import Variable
-from dataset import ShapeNetDataset
-from model import PointNetDenseCls , ContrastiveNet, PartsToPtsNet
-import matplotlib.pyplot as plt
-import sys
 import os
+
+import numpy as np
 import cv2
 import pandas as pd
+import torch
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
 
-from torch.utils.data import DataLoader, RandomSampler
-from torch.utils.data import Dataset
+# 日本語フォント設定
+plt.rcParams['font.sans-serif'] = ['MS Gothic', 'Yu Gothic', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
-"""
-cv2でコサイン類似度の行列を0→1でグラデーションしたimgを作成する。
+from dataset import ShapeNetDataset
+from model import PointNetDenseCls, ContrastiveNet, PartsToPtsNet
+from functions import load_models
 
-"""
-
-
-
-parser = argparse.ArgumentParser()
-
-choice="Mug"
-
-parser.add_argument('--model', type=str, default='', help='model path')
+parser = argparse.ArgumentParser(description='Cosine similarity visualization')
+parser.add_argument('--model', type=str, default='model_Contratstive_Parts2Gesture', help='model path')
 parser.add_argument('--samplesize', type=int, default=16, help='input batch size')
-parser.add_argument('--dataset', type=str, default='neuralnet_dataset_unity', help='dataset path')
+parser.add_argument('--dataset', type=str, default='dataset', help='dataset path')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument('--class_choice', type=str, default=choice, help='class choice')
+parser.add_argument('--class_choice', type=str, default='', help='class choice')
+parser.add_argument('--save', action='store_true', help='save visualization images instead of showing')
+parser.add_argument('--savedir', type=str, default='./output', help='directory to save images')
 
 opt = parser.parse_args()
 print(opt)
+
+# 保存ディレクトリの作成
+if opt.save and not os.path.exists(opt.savedir):
+    os.makedirs(opt.savedir)
+    print(f"Created save directory: {opt.savedir}")
 
 d = ShapeNetDataset(
     root=opt.dataset,
@@ -47,37 +51,17 @@ database =  ShapeNetDataset(
     split='search',
     data_augmentation=False)
 
-dloader = DataLoader(d,batch_size=10,shuffle=False)
+dloader = DataLoader(d, batch_size=10, shuffle=False)
+databaseloader = DataLoader(database, batch_size=len(os.listdir(os.path.join(opt.dataset, "search/pts"))), shuffle=False)
 
-#databaseloader = DataLoader(database,batch_size=len(os.listdir(os.path.join(opt.dataset,"search/pts"))),shuffle=False)
-databaseloader = DataLoader(database,batch_size=len(os.listdir(os.path.join(opt.dataset,"search/pts"))),shuffle=False)
+# モデル読み込み
+classifier, sk_parts_classifier, p2pts_classifier = load_models(opt.model)
 
-#model load 
-
-"----partseg----"
-state_dict = torch.load("model_Contratstive_Parts2Gesture/pointnet_model_loss_total_best.pth",weights_only=False)
-#print( state_dict['conv4.weight'].size()[0])
-classifier = PointNetDenseCls(k= state_dict['conv4.weight'].size()[0])
-classifier.load_state_dict(state_dict)
-classifier.eval()
-
-"----pts2ges----"
-state_dict_contrastive = torch.load("model_Contratstive_Parts2Gesture/contrastive_model_loss_partseg_best.pth",weights_only=False)
-sk_parts_classifier = ContrastiveNet()
-sk_parts_classifier.load_state_dict(state_dict_contrastive)
-sk_parts_classifier.eval()
-"----parts2pts----"
-state_dict_contrastive = torch.load("model_Contratstive_Parts2Gesture/parts2pts_model_loss_total_best.pth",weights_only=False)
-p2pts_classifier = PartsToPtsNet()
-p2pts_classifier.load_state_dict(state_dict_contrastive)
-p2pts_classifier.eval()
-
-
-pts,seg, hands, label, batch_w = next(iter(dloader))
+pts, seg, hands, label, batch_w = next(iter(dloader))
 pts_base, seg_base, hands_base, label_base, batch_w_base = next(iter(databaseloader))
 
-#すべてのジェスチャーの中のどれと一番マッチするか
-def parts2ges_all(p,g,seg):
+# すべてのジェスチャーの中から最もマッチするものを見つける
+def parts2ges_all(p, g, seg):
     outarr_p_size=p.shape[0]
     outarr_g_size=g.shape[0]
     points =p.transpose(2, 1).contiguous()
@@ -86,7 +70,7 @@ def parts2ges_all(p,g,seg):
 
     pred_choice = pred.data.max(1)[1]
     pred_np = pred_choice.cpu().data.numpy()
-    # pred_choice 1 :left,  pred_choice 2 : right
+    # pred_choice 1: 左手, 2: 右手
     
     points=points.transpose(1, 2).cpu().data.numpy()
     pred_np=pred_np.reshape(outarr_p_size,2048,1)
@@ -141,12 +125,12 @@ def parts2ges_all(p,g,seg):
     pr=torch.from_numpy(pr)
     pl=pl.transpose(2,1)
     pr=pr.transpose(2,1)
-    #------------------------------------------------
+    # ------------------------------------------------
 
     hand=np.split(g,2,axis=1)
     hand_l=hand[0]
     hand_r=hand[1]
-    #手首を0に
+    # 手首を0に正規化
     for k in range(outarr_g_size):
         hand_l[k] = hand_l[k] - hand_l[k][0]
         hand_r[k] = hand_r[k] - hand_r[k][0]
@@ -164,7 +148,7 @@ def parts2ges_all(p,g,seg):
     
     sim_parts_per_ges = torch.cat((sim_pl_per_g, sim_pr_per_g),dim=0).transpose(1,0)
     sim_parts_per_ges = sim_parts_per_ges.detach().numpy()
-    print("AAAAAAAAAAAAAAAAA")
+    print("デバッグ出力")
     mat=sim_parts_per_ges.shape[1]//sim_parts_per_ges.shape[0]
     if mat==0:
         mat=1
@@ -183,8 +167,8 @@ def parts2ges_all(p,g,seg):
 
     return image
 
-#全部と全部
-#image=parts2ges_all(pts,hands)
+# すべて対すべての類似度マトリックス
+# image=parts2ges_all(pts,hands)
 
 def parts2ges(p,g,seg):
     outarr_p_size=p.shape[0]
@@ -195,7 +179,7 @@ def parts2ges(p,g,seg):
 
     pred_choice = pred.data.max(1)[1]
     pred_np = pred_choice.cpu().data.numpy()
-    # pred_choice 1 :left,  pred_choice 2 : right
+    # pred_choice 1: 左手, 2: 右手
     
     points=points.transpose(1, 2).cpu().data.numpy()
     pred_np=pred_np.reshape(outarr_p_size,2048,1)
@@ -253,7 +237,7 @@ def parts2ges(p,g,seg):
     hand=np.split(g,2,axis=1)
     hand_l=hand[0]
     hand_r=hand[1]
-    #手首を0に
+    # 手首を0に正規化
     for k in range(outarr_g_size):
         hand_l[k] = hand_l[k] - hand_l[k][0]
         hand_r[k] = hand_r[k] - hand_r[k][0]
@@ -281,7 +265,7 @@ def parts2ges(p,g,seg):
         for w in range(sim_parts_per_g_r.shape[1]):
             img_r[h][w]= sim_parts_per_g_r[h][w]
 
-    #parts2pts
+    # パーツ→ポイント類似度
     sim_parts_per_pts, _ = p2pts_classifier(parts_l_feat, parts_r_feat, all_feat)
     sim_parts_per_pts=sim_parts_per_pts.detach().numpy()
     img_parts_per_pts=np.zeros((sim_parts_per_pts.shape[0],sim_parts_per_pts.shape[1]))
@@ -313,67 +297,72 @@ for filename in np.array(label_base):
     count+=1
 
 
-
-
 ziku_label=ziku_label
 ziku_label[0]=0
 ziku_label=np.append(ziku_label,len(label_base))
 print(ziku_label)
 
 import matplotlib.colors as mcolors
-#image=parts2ges_all(pts_base,hands_base,seg_base)
+image=parts2ges_all(pts_base,hands_base,seg_base)
 cate_color=["white","red","pink","orange",""]
 il,ir,i_parts2pts=parts2ges(pts_base,hands_base,seg_base)
 plt.rcParams["font.size"]=15
 
 plt.figure(1)
 plt.figure(figsize=(8, 8)) 
+plt.title('左手：ジェスチャー ← → パーツ形状のコサイン類似度', fontsize=16)
 plt.imshow(il, cmap='viridis', aspect='equal',vmax=1,vmin=0)
 labels =[int(round(tick)) for tick in ziku_label] 
-plt.colorbar()  # カラーバーを表示
+plt.colorbar(label='コサイン類似度')  # カラーバー表示
 plt.xticks(ticks=ziku_label-0.5,labels=labels)
 plt.xticks(rotation=90)
 plt.yticks(ticks=ziku_label-0.5,labels=labels)
-plt.savefig('colormap_image.png', dpi=300)
-"""
-plt.xlabel("gesture_feat")
-plt.ylabel("parts_feat")
-"""
 
+plt.xlabel("ジェスチャー特徴")
+plt.ylabel("パーツ特徴")
 plt.tick_params(labelsize=8.5)
-# グラフを表示
 
-
+if opt.save:
+    plt.savefig(os.path.join(opt.savedir, 'cosinsim_left_hand.png'), dpi=100, bbox_inches='tight')
+else:
+    plt.savefig('colormap_image.png', dpi=300)
 
 plt.figure(2)
 plt.figure(figsize=(8, 8)) 
+plt.title('右手：ジェスチャー ← → パーツのコサイン類似度', fontsize=16)
 plt.imshow(ir, cmap='viridis', aspect='equal',vmax=1,vmin=0)
 labels =[int(round(tick)) for tick in ziku_label] 
-plt.colorbar()  # カラーバーを表示
+plt.colorbar(label='コサイン類似度')  # カラーバー表示
 plt.xticks(ticks=ziku_label-0.5,labels=labels)
 plt.xticks(rotation=90)
 plt.yticks(ticks=ziku_label-0.5,labels=labels)
-"""
-plt.xlabel("gesture_feat")
-plt.ylabel("parts_feat")
-"""
+plt.xlabel("ジェスチャー特徴")
+plt.ylabel("パーツ特徴")
 plt.tick_params(labelsize=8.5)
 
+if opt.save:
+    plt.savefig(os.path.join(opt.savedir, 'cosinsim_right_hand.png'), dpi=100, bbox_inches='tight')
 
 plt.figure(3)
 plt.figure(figsize=(8, 8)) 
+plt.title('両手のパーツ ← → ポイントのコサイン類似度', fontsize=16)
 plt.imshow(i_parts2pts, cmap='viridis', aspect='equal',vmax=1,vmin=0)
 labels =[int(round(tick)) for tick in ziku_label] 
-plt.colorbar()  # カラーバーを表示
+plt.colorbar(label='コサイン類似度')  # カラーバー表示
 plt.xticks(ticks=ziku_label-0.5,labels=labels)
 plt.xticks(rotation=90)
 plt.yticks(ticks=ziku_label-0.5,labels=labels)
-"""
-plt.xlabel("gesture_feat")
-plt.ylabel("parts_feat")
-"""
+
+plt.xlabel("ジェスチャー特徴")
+plt.ylabel("パーツ特徴")
+
 plt.tick_params(labelsize=8.5)
-plt.show()
+
+if opt.save:
+    plt.savefig(os.path.join(opt.savedir, 'cosinsim_parts_to_points.png'), dpi=100, bbox_inches='tight')
+    print(f"All images saved to {opt.savedir}")
+else:
+    plt.show()
 
 
 
