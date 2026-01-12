@@ -70,7 +70,7 @@ dataset/
 │
 ├── search/                  # 検索用データベース（参照セット）
 │   ├── pts/
-├── pts_label/
+│   ├── pts_label/
 │   └── hands/
 ```
 
