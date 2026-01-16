@@ -1,4 +1,4 @@
-# Parts2Gesture
+# Shape2Gesture_SearchModel
 
 接触部位形状を介した、全体形状と両手把持ジェスチャの相互検索システム
 
@@ -60,19 +60,19 @@ Parts2Gesture/
 
 ```
 dataset/
-├── train/                   # 訓練用データ（約1000サンプル）
+├── train/                   # 訓練用データ
 │   ├── pts/                 # ポイントクラウド (CSV形式, 2048×3)
 │   ├── pts_label/           # セグメンテーション教師信号 (CSV形式, 2048×1)
 │   │                        # 0:背景, 1:左手接触, 2:右手接触
 │   └── hands/               # 手ジェスチャー (CSV形式, 2×69)
 │                            # 各手23個関節×3軸 
 │
-├── val/                     # 検証用データ（約200サンプル）
+├── val/                     # 検証用データ
 │   ├── pts/
 │   ├── pts_label/
 │   └── hands/
 │
-├── search/                  # 検索用データベース（参照セット）
+├── search/                  # 検索用データベース（訓練 + 検証）
 │   ├── pts/
 │   ├── pts_label/
 │   └── hands/
@@ -127,12 +127,17 @@ python show_cosinsim.py \
 
 
 ## 必要環境
-- Python 3.7
+- Python 3.9
 - PyTorch 2.5
+- CUDA 11.3, 11.8, 12.1で確認済み
 - NumPy, Matplotlib, OpenCV, Pandas, tqdm
 
 ## インストール
 
 ```bash
-pip install torch numpy matplotlib opencv-python pandas plyfile tqdm
+git clone https://github.com/yu0225dayo/Shape2Gesture_SearchModel
+cd Shape2Gesture_SearchModel
+
+conda env create -f enviroment.yml
+conda activate py39_pytorch
 ```

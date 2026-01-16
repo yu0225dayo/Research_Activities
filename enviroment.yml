@@ -1,4 +1,4 @@
-name: sm
+name: py39_pytorchS
 channels:
   - pytorch
   - nvidia
@@ -187,4 +187,3 @@ dependencies:
       - trimesh==4.6.6
       - tzdata==2025.2
       - win32-setctime==1.2.0
-prefix: C:\Users\okayu\.conda\envs\sm
