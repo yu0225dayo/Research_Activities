@@ -11,7 +11,7 @@
 
 本研究では、CLIPを参考に**把持姿勢と接触部位形状**の関係を学習し共通の潜在空間に埋め込むことで、汎用的なモデルの実現を目指す。このモデルを用いて、全体形状と把持姿勢の相互検索システムの構築を行う。
 ※接触部位形状の獲得はPointNetを用いて学習したモデルを用いる。
-- PointNet: https://github.com/charlesq34/pointnet  
+- PointNet: https://github.com/fxia22/pointnet.pytorch 
 - CLIP: https://github.com/openai/CLIP
 
 ## 主な特徴
