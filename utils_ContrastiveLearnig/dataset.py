@@ -25,8 +25,6 @@ class ShapeNetDataset(data.Dataset):
         self,
         root: str,
         npoints: int = 2048,
-        classification: bool = False,
-        class_choice: Optional[str] = None,
         split: str = 'train',
         data_augmentation: bool = True
     ):
@@ -34,10 +32,6 @@ class ShapeNetDataset(data.Dataset):
         self.root = root
         self.split = split
         self.data_augmentation = data_augmentation
-        self.classification = classification
-        self.name = class_choice
-        self.classes = {self.name: 20}
-        self.seg_classes = self.name
         self.num_seg_classes = 3
         self.datapath = []
 
@@ -88,7 +82,6 @@ class ShapeNetDataset(data.Dataset):
         """
         fn = self.datapath[index]
         point_set = np.array(pd.read_csv(fn[1], header=None)).astype(np.float32)
-        cls = self.classes[self.datapath[index][0]]
         hand_set = np.array(pd.read_csv(fn[3], header=None)).astype(np.float32)
         label = fn[4]
 
@@ -130,90 +123,14 @@ class ShapeNetDataset(data.Dataset):
 
         point_set = torch.from_numpy(point_set.astype(np.float32))
         seg = torch.from_numpy(seg)
-        cls = torch.from_numpy(np.array([cls]).astype(np.int64))
         hand_set_rote = torch.from_numpy(hand_set_rote.astype(np.float32))
         batch_weight = torch.from_numpy(batch_weight.astype(np.float32))
 
-        if self.classification:
-            return point_set, cls
-        else:
-            return point_set, seg, hand_set_rote, label, batch_weight
+        return point_set, seg, hand_set_rote, label, batch_weight
 
     def __len__(self) -> int:
         return len(self.datapath)
     
-
-class ModelNetDataset(data.Dataset):
-    """Load ModelNet point cloud classification dataset."""
-    
-    def __init__(
-        self,
-        root: str,
-        npoints: int = 2048,
-        split: str = 'train',
-        data_augmentation: bool = True
-    ):
-        self.npoints = npoints
-        self.root = root
-        self.split = split
-        self.data_augmentation = data_augmentation
-        self.fns = []
-        
-        with open(os.path.join(root, f'{self.split}.txt'), 'r') as f:
-            for line in f:
-                self.fns.append(line.strip())
-
-        self.cat = {}
-        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 
-                              '../misc/modelnet_id.txt'), 'r') as f:
-            for line in f:
-                ls = line.strip().split()
-                self.cat[ls[0]] = int(ls[1])
-
-        self.classes = list(self.cat.keys())
-        print(f"Loaded {len(self.fns)} ModelNet samples")
-
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Load a point cloud and its class label."""
-        fn = self.fns[index]
-        cls = self.cat[fn.split('/')[0]]
-        
-        with open(os.path.join(self.root, fn), 'rb') as f:
-            plydata = PlyData.read(f)
-        
-        pts = np.vstack([
-            plydata['vertex']['x'],
-            plydata['vertex']['y'],
-            plydata['vertex']['z']
-        ]).T
-        
-        choice = np.random.choice(len(pts), self.npoints, replace=True)
-        point_set = pts[choice, :]
-
-        # Normalize point cloud
-        point_set = point_set - np.expand_dims(np.mean(point_set, axis=0), 0)
-        dist = np.max(np.sqrt(np.sum(point_set ** 2, axis=1)), 0)
-        point_set = point_set / (dist + 1e-8)
-
-        # Data augmentation
-        if self.data_augmentation:
-            theta = np.random.uniform(0, np.pi * 2)
-            rotation_matrix = np.array([
-                [np.cos(theta), -np.sin(theta)],
-                [np.sin(theta), np.cos(theta)]
-            ])
-            point_set[:, [0, 2]] = point_set[:, [0, 2]].dot(rotation_matrix)
-            point_set += np.random.normal(0, 0.02, size=point_set.shape)
-
-        point_set = torch.from_numpy(point_set.astype(np.float32))
-        cls = torch.from_numpy(np.array([cls]).astype(np.int64))
-        
-        return point_set, cls
-
-    def __len__(self) -> int:
-        return len(self.fns)
-
-
 
 if __name__ == '__main__':
     """Test dataset loading."""

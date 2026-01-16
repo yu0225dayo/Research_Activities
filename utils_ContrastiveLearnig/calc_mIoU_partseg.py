@@ -15,13 +15,12 @@ from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
 from dataset import ShapeNetDataset
-from model import PointNetDenseCls
+from model import PointNet_PartsSeg
 from functions import load_models
 
 parser = argparse.ArgumentParser(description='mIoU evaluation for part segmentation')
-parser.add_argument('--model', type=str, default='model_Contratstive_Parts2Gesture', help='model directory path')
+parser.add_argument('--model', type=str, default='Contratstive_Parts2Gesture', help='model directory path')
 parser.add_argument('--dataset', type=str, default='dataset', help='dataset path')
-parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
 
 opt = parser.parse_args()
 print(opt)
@@ -41,7 +40,7 @@ dloader = DataLoader(d, batch_size=10, shuffle=False)
 databaseloader = DataLoader(database, batch_size=len(os.listdir(os.path.join(opt.dataset, "search/pts"))), shuffle=False)
 
 # モデル読み込み
-classifier, _, _ = load_models(opt.model)
+model_pointnet, _, _ = load_models(opt.model)
 
 arr_mIoU_partseg = np.array([])
 arr_name = np.array([])
@@ -72,7 +71,7 @@ for pts_csv in os.listdir(pts_dir):
     point = point_set.transpose(1, 0).contiguous()
 
     point = Variable(point.view(1, point.size()[0], point.size()[1]))
-    pred, _, _, all_feat = classifier(point)
+    pred, _, _, all_feat = model_pointnet(point)
     pred_choice = pred.data.max(2)[1]
     print(seg_label.shape, pred_choice.shape)
     mIoU_partseg = torch.sum(torch.eq(seg_label, pred_choice)) / 2048

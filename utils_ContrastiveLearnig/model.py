@@ -5,9 +5,9 @@ This module implements various deep learning architectures:
 - STN3d: Spatial Transformer Network for 3D
 - STNkd: Spatial Transformer Network for k-dimensional features
 - PointNetfeat: Feature extraction from point clouds
-- PointNetDenseCls: Dense classification on point clouds
-- ContrastiveNet: Gesture-to-parts cross-modal contrastive learning
-- PartsToPtsNet: Parts-to-points mapping network
+- PointNet_PartsSeg: Parts segmentation on point clouds
+- Ges2PartsNet: Gesture-to-parts cross-modal contrastive learning ★original★
+- Parts2ShapeNet: Parts-to-points mapping network ★original★
 """
 
 import torch
@@ -203,11 +203,11 @@ class PointNetCls(nn.Module):
         return F.log_softmax(x, dim=1), trans, trans_feat
 
 #segmentation k=number of segmentation classes
-class PointNetDenseCls(nn.Module):
+class PointNet_PartsSeg(nn.Module):
     """Dense classification network for part segmentation."""
     
     def __init__(self, k: int = 2, feature_transform: bool = False):
-        super(PointNetDenseCls, self).__init__()
+        super(PointNet_PartsSeg, self).__init__()
         self.k = k
         self.feature_transform = feature_transform
         self.feat = PointNetfeat(global_feat=False, feature_transform=feature_transform)
@@ -302,11 +302,11 @@ class PartsNet(nn.Module):
 
         return x
 
-class ContrastiveNet(nn.Module):
+class Ges2PartsNet(nn.Module):
     """Compute contrastive similarity between gestures and point cloud parts."""
     
     def __init__(self):
-        super(ContrastiveNet, self).__init__()
+        super(Ges2PartsNet, self).__init__()
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.sknet = SkeltonNet()
         self.partsnet = PartsNet()
@@ -380,11 +380,11 @@ class PtsFeatNet(nn.Module):
         return x
 
 
-class PartsToPtsNet(nn.Module):
+class Parts2ShapeNet(nn.Module):
     """Map between parts and point clouds using contrastive learning."""
     
     def __init__(self):
-        super(PartsToPtsNet, self).__init__()
+        super(Parts2ShapeNet, self).__init__()
         self.bothpartsnet = BothPartsNet2()
         self.parts2pts = PtsFeatNet()
 
@@ -416,29 +416,4 @@ def feature_transform_regularizer(trans: torch.Tensor) -> torch.Tensor:
     return loss
 
 
-class PartsToPtsNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.bothpartsnet=BothPartsNet2()
-        self.parts2pts=PtsFeatNet()
-    
-    def forward(self,parts_feat_l,parts_feat_r,all_feat):
-        
-        p_feat=self.bothpartsnet(parts_feat_l,parts_feat_r)
-        pts_feat=self.parts2pts(all_feat)
 
-        p_feat = p_feat / p_feat.norm(dim=-1, keepdim=True)
-        pts_feat = pts_feat / pts_feat.norm(dim=-1, keepdim=True)
-
-        logit_per_p = p_feat @ pts_feat.t()
-        logit_per_pts = logit_per_p.t()
-        return logit_per_p, logit_per_pts
-
-def feature_transform_regularizer(trans):
-    d = trans.size()[1]
-    batchsize = trans.size()[0]
-    I = torch.eye(d)[None, :, :]
-    if trans.is_cuda:
-        I = I.cuda()
-    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2,1)) - I, dim=(1,2)))
-    return loss

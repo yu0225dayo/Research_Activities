@@ -21,15 +21,13 @@ plt.rcParams['font.sans-serif'] = ['MS Gothic', 'Yu Gothic', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 from dataset import ShapeNetDataset
-from model import PointNetDenseCls, ContrastiveNet, PartsToPtsNet
+from model import PointNet_PartsSeg, Ges2PartsNet, Parts2ShapeNet
 from functions import load_models
 
 parser = argparse.ArgumentParser(description='Cosine similarity visualization')
-parser.add_argument('--model', type=str, default='model_Contratstive_Parts2Gesture', help='model path')
+parser.add_argument('--model', type=str, default='Contratstive_Parts2Gesture', help='model path')
 parser.add_argument('--samplesize', type=int, default=16, help='input batch size')
 parser.add_argument('--dataset', type=str, default='dataset', help='dataset path')
-parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument('--class_choice', type=str, default='', help='class choice')
 parser.add_argument('--save', action='store_true', help='save visualization images instead of showing')
 parser.add_argument('--savedir', type=str, default='./output', help='directory to save images')
 
@@ -55,7 +53,7 @@ dloader = DataLoader(d, batch_size=10, shuffle=False)
 databaseloader = DataLoader(database, batch_size=len(os.listdir(os.path.join(opt.dataset, "search/pts"))), shuffle=False)
 
 # モデル読み込み
-classifier, sk_parts_classifier, p2pts_classifier = load_models(opt.model)
+model_pointnet, model_ges2parts, model_parts2shape = load_models(opt.model)
 
 pts, seg, hands, label, batch_w = next(iter(dloader))
 pts_base, seg_base, hands_base, label_base, batch_w_base = next(iter(databaseloader))
@@ -65,7 +63,7 @@ def parts2ges_all(p, g, seg):
     outarr_p_size=p.shape[0]
     outarr_g_size=g.shape[0]
     points =p.transpose(2, 1).contiguous()
-    pred, _, _,all_feat = classifier(points)
+    pred, _, _,all_feat = model_pointnet(points)
     pred = pred.view(-1, 3)
 
     pred_choice = pred.data.max(1)[1]
@@ -137,12 +135,11 @@ def parts2ges_all(p, g, seg):
 
     hand_l=hand_l.reshape(outarr_g_size,69)
     hand_r=hand_r.reshape(outarr_g_size,69)
-    sim_pl_gl, _, _, parts_l_feat =sk_parts_classifier(hand_l, pl, all_feat)
-    sim_pr_gr, _, _, parts_r_feat =sk_parts_classifier(hand_r, pr, all_feat)
+    sim_pl_gl, _, _, parts_l_feat = model_ges2parts(hand_l, pl, all_feat)
+    sim_pr_gr, _, _, parts_r_feat = model_ges2parts(hand_r, pr, all_feat)
 
-    sim_pl_gr, _, _, parts_l_feat =sk_parts_classifier(hand_l, pr, all_feat)
-    sim_pr_gl, _, _, parts_r_feat =sk_parts_classifier(hand_r, pl, all_feat)
-
+    sim_pl_gr, _, _, parts_l_feat = model_ges2parts(hand_l, pr, all_feat)
+    sim_pr_gl, _, _, parts_r_feat = model_ges2parts(hand_r, pl, all_feat)
     sim_pl_per_g = torch.cat((sim_pl_gl,sim_pl_gr),dim=1)
     sim_pr_per_g = torch.cat((sim_pr_gl,sim_pr_gr),dim=1)
     
@@ -174,7 +171,7 @@ def parts2ges(p,g,seg):
     outarr_p_size=p.shape[0]
     outarr_g_size=g.shape[0]
     points =p.transpose(2, 1).contiguous()
-    pred, _, _,all_feat = classifier(points)
+    pred, _, _,all_feat = model_pointnet(points)
     pred = pred.view(-1, 3)
 
     pred_choice = pred.data.max(1)[1]
@@ -244,8 +241,8 @@ def parts2ges(p,g,seg):
 
     hand_l=hand_l.reshape(outarr_g_size,69)
     hand_r=hand_r.reshape(outarr_g_size,69)
-    sim_pl_gl, _, _, parts_l_feat =sk_parts_classifier(hand_l, pl, all_feat)
-    sim_pr_gr, _, _, parts_r_feat =sk_parts_classifier(hand_r, pr, all_feat)
+    sim_pl_gl, _, _, parts_l_feat =model_ges2parts(hand_l, pl, all_feat)
+    sim_pr_gr, _, _, parts_r_feat =model_ges2parts(hand_r, pr, all_feat)
 
     sim_parts_per_g_l = sim_pl_gl.transpose(1,0)
     sim_parts_per_ges_l= sim_parts_per_g_l.detach().numpy()
@@ -266,7 +263,7 @@ def parts2ges(p,g,seg):
             img_r[h][w]= sim_parts_per_g_r[h][w]
 
     # パーツ→ポイント類似度
-    sim_parts_per_pts, _ = p2pts_classifier(parts_l_feat, parts_r_feat, all_feat)
+    sim_parts_per_pts, _ = model_parts2shape(parts_l_feat, parts_r_feat, all_feat)
     sim_parts_per_pts=sim_parts_per_pts.detach().numpy()
     img_parts_per_pts=np.zeros((sim_parts_per_pts.shape[0],sim_parts_per_pts.shape[1]))
     for h in range(sim_parts_per_pts.shape[0]):

@@ -20,7 +20,7 @@ plt.rcParams['font.sans-serif'] = ['MS Gothic', 'Yu Gothic', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 from dataset import ShapeNetDataset
-from model import PointNetDenseCls, ContrastiveNet, PartsToPtsNet
+from model import PointNet_PartsSeg, Ges2PartsNet, Parts2ShapeNet
 from visualization import drawpts, drawhand, drawparts
 from functions import *
 
@@ -55,7 +55,7 @@ hand_l = hand_l.reshape(1, 69)
 hand_r = hand_r.reshape(1, 69)
 
 # モデル読み込み
-classifier, sk_parts_classifier, p2pts_classifier = load_models(opt.model)
+model_pointnet, model_ges2parts, model_parts2shape = load_models(opt.model)
 
 min_logit_sk_l = 0
 min_logit_parts_l = 0
@@ -83,7 +83,7 @@ for pts_csv in os.listdir(pts_dir):
     point = point_set.transpose(1, 0).contiguous()
 
     point = Variable(point.view(1, point.size()[0], point.size()[1]))
-    pred, _, _, all_feat= classifier(point)
+    pred, _, _, all_feat= model_pointnet(point)
     pred_choice = pred.data.max(2)[1].cpu()
 
     pred_choice = pred_choice[0]
@@ -101,8 +101,8 @@ for pts_csv in os.listdir(pts_dir):
         pr_move = np.expand_dims(np.mean(pr.numpy() if isinstance(pr, torch.Tensor) else pr, axis=2), 0)
 
         # hand_l, hand_r = hand_l.cuda(), hand_r.cuda()
-        logit_per_sk_l, logit_per_parts_l, sk_feat_l, parts_feat_l = sk_parts_classifier(hand_l, parts_l, all_feat)
-        logit_per_sk_r, logit_per_parts_r, sk_feat_r, parts_feat_r = sk_parts_classifier(hand_r, parts_r, all_feat)
+        logit_per_sk_l, logit_per_parts_l, sk_feat_l, parts_feat_l = model_ges2parts(hand_l, parts_l, all_feat)
+        logit_per_sk_r, logit_per_parts_r, sk_feat_r, parts_feat_r = model_ges2parts(hand_r, parts_r, all_feat)
 
         if logit_per_sk_l > min_logit_sk_l:
             pf_l = parts_feat_l
@@ -141,9 +141,9 @@ for pts_csv in os.listdir(pts_dir):
     # パーツセグメンテーション
     point = point_set.transpose(1, 0).contiguous()
     point = Variable(point.view(1, point.size()[0], point.size()[1]))
-    pred, _, _, all_feat = classifier(point)
+    pred, _, _, all_feat = model_pointnet(point)
     
-    logit_per_p, logit_per_pts = p2pts_classifier(pf_l, pf_r, all_feat)
+    logit_per_p, logit_per_pts = model_parts2shape(pf_l, pf_r, all_feat)
 
     if logit_per_p > min_logit_per_p:
         pred_pts_csv=pts_path

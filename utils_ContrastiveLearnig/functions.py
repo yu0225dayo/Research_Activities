@@ -14,7 +14,7 @@ import pandas as pd
 from torch.utils.data import DataLoader
 
 from dataset import ShapeNetDataset
-from model import PointNetDenseCls, ContrastiveNet, PartsToPtsNet
+from model import PointNet_PartsSeg, Ges2PartsNet, Parts2ShapeNet
 
 
 def load_models(model_dir: str) -> Tuple:
@@ -25,30 +25,30 @@ def load_models(model_dir: str) -> Tuple:
         model_dir: モデルディレクトリパス
     
     Returns:
-        (PointNetDenseCls, ContrastiveNet, PartsToPtsNet) のタプル
+        (PointNet_PartsSeg, Ges2PartsNet, Parts2ShapeNet) のタプル
     """
     # パーツセグメンテーションモデル
-    pointnet_path = os.path.join(model_dir, "pointnet_model_loss_total_best.pth")
+    pointnet_path = os.path.join(model_dir, "pointnet_model.pth")
     pointnet_state = torch.load(pointnet_path, weights_only=False)
-    pointnet_classifier = PointNetDenseCls(k=3)
-    pointnet_classifier.load_state_dict(pointnet_state)
-    pointnet_classifier.eval()
+    model_pointnet = PointNet_PartsSeg(k=3)
+    model_pointnet.load_state_dict(pointnet_state)
+    model_pointnet.eval()
 
     # ジェスチャー→パーツ対比学習モデル
-    contrastive_path = os.path.join(model_dir, "contrastive_model_loss_partseg_best.pth")
+    contrastive_path = os.path.join(model_dir, "contrastive_model.pth")
     contrastive_state = torch.load(contrastive_path, weights_only=False)
-    sk_parts_classifier = ContrastiveNet()
-    sk_parts_classifier.load_state_dict(contrastive_state)
-    sk_parts_classifier.eval()
+    model_ges2parts = Ges2PartsNet()
+    model_ges2parts.load_state_dict(contrastive_state)
+    model_ges2parts.eval()
 
     # パーツ→ポイント写像モデル
-    parts2pts_path = os.path.join(model_dir, "parts2pts_model_loss_total_best.pth")
+    parts2pts_path = os.path.join(model_dir, "parts2pts_model.pth")
     parts2pts_state = torch.load(parts2pts_path, weights_only=False)
-    p2pts_classifier = PartsToPtsNet()
-    p2pts_classifier.load_state_dict(parts2pts_state)
-    p2pts_classifier.eval()
+    model_parts2shape = Parts2ShapeNet()
+    model_parts2shape.load_state_dict(parts2pts_state)
+    model_parts2shape.eval()
 
-    return pointnet_classifier, sk_parts_classifier, p2pts_classifier
+    return model_pointnet, model_ges2parts, model_parts2shape
 
 
 def extract_parts(

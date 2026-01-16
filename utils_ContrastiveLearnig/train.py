@@ -18,9 +18,8 @@ import torch.optim as optim
 import torch.utils.data
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-
 from dataset import ShapeNetDataset
-from model import PointNetDenseCls, feature_transform_regularizer, ContrastiveNet, PartsToPtsNet
+from model import PointNet_PartsSeg, feature_transform_regularizer, Ges2PartsNet, Parts2ShapeNet
 from functions import load_models
 
 def calculate_accuracy(logits: torch.Tensor, labels: torch.Tensor, top_k: Tuple = (1, 5)) -> Dict:
@@ -77,7 +76,6 @@ if __name__=="__main__":
 
     dataset = ShapeNetDataset(
         root=opt.dataset,
-        classification=False,
         data_augmentation=True)
     print(dataset)
     dataloader = torch.utils.data.DataLoader(
@@ -92,7 +90,6 @@ if __name__=="__main__":
     
     test_dataset = ShapeNetDataset(
         root=opt.dataset,
-        classification=False,
         split='val',
         data_augmentation=False)
     testdataloader = torch.utils.data.DataLoader(
@@ -113,18 +110,18 @@ if __name__=="__main__":
     # モデル初期化
     if opt.model != '' and os.path.exists(opt.model):
         # 既存モデルを読み込む場合
-        pointnet_classifier, sk_parts_classifier, parts2pts_classifier = load_models(opt.model)
+        model_pointnet, model_ges2parts, model_pars2shape = load_models(opt.model)
     else:
         # 新規モデルを初期化
-        pointnet_classifier = PointNetDenseCls(k=3, feature_transform=opt.feature_transform)
-        sk_parts_classifier = ContrastiveNet()
-        parts2pts_classifier = PartsToPtsNet()
+        model_pointnet = PointNet_PartsSeg(k=3, feature_transform=opt.feature_transform)
+        model_ges2parts = Ges2PartsNet()
+        model_pars2shape = Parts2ShapeNet()
 
-    optimizer = optim.Adam([{"params":pointnet_classifier.parameters()},{"params":sk_parts_classifier.parameters()},{"params":parts2pts_classifier.parameters()}] ,  lr=0.001, betas=(0.9, 0.999))
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
-    pointnet_classifier.cuda()
-    sk_parts_classifier.cuda()
-    parts2pts_classifier.cuda()
+    optimizer = optim.Adam([{"params":model_pointnet.parameters()},{"params":model_ges2parts.parameters()},{"params":model_pars2shape.parameters()}] ,  lr=0.001, betas=(0.9, 0.999))
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)
+    model_pointnet.cuda()
+    model_ges2parts.cuda()
+    model_pars2shape.cuda()
 
     num_batch = len(dataset) / opt.batchSize
     best_partseg_acc = 0
@@ -150,9 +147,9 @@ if __name__=="__main__":
             
             points, target, loss_weight = points.cuda(), target.cuda() ,loss_weight.cuda()
             optimizer.zero_grad()
-            pointnet_classifier = pointnet_classifier.train()
+            model_pointnet = model_pointnet.train()
             #parts seg
-            pred, trans, trans_feat,all_feat = pointnet_classifier(points)
+            pred, trans, trans_feat,all_feat = model_pointnet(points)
             pred = pred.view(-1, num_classes)
             target = target.view(-1, 1)[:, 0]
             
@@ -233,9 +230,9 @@ if __name__=="__main__":
             hand_l, hand_r, parts_l, parts_r, all_feat = hand_l.cuda(), hand_r.cuda(), pl.cuda(), pr.cuda(), all_feat.cuda()
             #train parts2ges
             #input : input_sk,input_parts,input_all_feat   out: logit_per_sk, logit_per_parts
-            sk_parts_classifier = sk_parts_classifier.train()
-            logit_per_sk_l, logit_per_parts_l, sk_feat_l, parts_feat_l = sk_parts_classifier(hand_l, parts_l, all_feat)
-            logit_per_sk_r, logit_per_parts_r, sk_feat_r, parts_feat_r = sk_parts_classifier(hand_r, parts_r, all_feat)
+            model_ges2parts = model_ges2parts.train()
+            logit_per_sk_l, logit_per_parts_l, sk_feat_l, parts_feat_l = model_ges2parts(hand_l, parts_l, all_feat)
+            logit_per_sk_r, logit_per_parts_r, sk_feat_r, parts_feat_r = model_ges2parts(hand_r, parts_r, all_feat)
             
             ans = torch.eye(opt.batchSize,opt.batchSize).cuda()
             loss_sk_l = F.cross_entropy(logit_per_sk_l,ans)
@@ -245,8 +242,8 @@ if __name__=="__main__":
             loss_parts_r = F.cross_entropy(logit_per_parts_r,ans)
 
             #parts2pts
-            parts2pts_classifier= parts2pts_classifier.train()
-            logit_per_p, logit_per_pts = parts2pts_classifier(parts_feat_l, parts_feat_r, all_feat)
+            model_pars2shape= model_pars2shape.train()
+            logit_per_p, logit_per_pts = model_pars2shape(parts_feat_l, parts_feat_r, all_feat)
             loss_p2pts = (F.cross_entropy(logit_per_p, ans) + F.cross_entropy(logit_per_pts,ans)) / 2
 
             loss_sk_parts = (loss_sk_l + loss_parts_l + loss_sk_r + loss_parts_r)/4
@@ -320,6 +317,7 @@ if __name__=="__main__":
             Writer.add_scalars("tensorboad/acc_p2pts",{"train":p2pts_acc},epoch)
             Writer.add_scalars("tensorboad/class_same_acc_parts2pts",{"train":class_same_acc_p2p},epoch)
 
+            #eval
             if (i+1) % 9 == 0:
                 j, data = next(enumerate(testdataloader,0))
                 
@@ -329,10 +327,10 @@ if __name__=="__main__":
                 partsseg_target=target
                 
                 points, target , loss_weight = points.cuda(), target.cuda(), loss_weight.cuda()
-                pointnet_classifier = pointnet_classifier.eval()
+                model_pointnet = model_pointnet.eval()
                 
                 #parts seg
-                pred, trans, trans_feat,all_feat = pointnet_classifier(points)
+                pred, trans, trans_feat,all_feat = model_pointnet(points)
                 
                 pred = pred.view(-1, num_classes)
                 target = target.view(-1, 1)[:, 0]
@@ -411,9 +409,9 @@ if __name__=="__main__":
 
                 #print(hand_l.shape,hand_r.shape, type(hand_l))
                 hand_l, hand_r, parts_l, parts_r, all_feat = hand_l.cuda(), hand_r.cuda(), pl.cuda(), pr.cuda(), all_feat.cuda()
-                sk_parts_classifier = sk_parts_classifier.eval()
-                logit_per_sk_l, logit_per_parts_l, sk_feat_l, parts_feat_l = sk_parts_classifier(hand_l, parts_l, all_feat)
-                logit_per_sk_r, logit_per_parts_r, sk_feat_r, parts_feat_r = sk_parts_classifier(hand_r, parts_r, all_feat)
+                model_ges2parts = model_ges2parts.eval()
+                logit_per_sk_l, logit_per_parts_l, sk_feat_l, parts_feat_l = model_ges2parts(hand_l, parts_l, all_feat)
+                logit_per_sk_r, logit_per_parts_r, sk_feat_r, parts_feat_r = model_ges2parts(hand_r, parts_r, all_feat)
 
                 ans = torch.eye(opt.batchSize,opt.batchSize).cuda()
                 loss_sk_l = F.cross_entropy(logit_per_sk_l,ans)
@@ -422,8 +420,8 @@ if __name__=="__main__":
                 loss_parts_r = F.cross_entropy(logit_per_parts_r,ans)
                 
                 #parts2pts
-                parts2pts_classifier = parts2pts_classifier.eval()
-                logit_per_p, logit_per_pts = parts2pts_classifier(parts_feat_l, parts_feat_r, all_feat)
+                model_pars2shape = model_pars2shape.eval()
+                logit_per_p, logit_per_pts = model_pars2shape(parts_feat_l, parts_feat_r, all_feat)
                 loss_p2pts = (F.cross_entropy(logit_per_p, ans) + F.cross_entropy(logit_per_pts,ans)) / 2
                 loss_sk_parts = (loss_sk_l + loss_parts_l + loss_sk_r + loss_parts_r)/4
                 loss = loss_sk_parts + loss_pointnet + loss_p2pts
@@ -485,44 +483,44 @@ if __name__=="__main__":
                 if val_acc > best_partseg_acc:
                     print("-----------")
                     print("best_partseg_accを更新（eval: {:.2f}%）".format(val_acc))
-                    torch.save(pointnet_classifier.state_dict(), '%s/pointnet_model_acc_partseg_best.pth' % (opt.outf))
-                    torch.save(sk_parts_classifier.state_dict(), '%s/contrastive_model_acc_partseg_best.pth' % (opt.outf))
-                    torch.save(parts2pts_classifier.state_dict(), '%s/parts2pts_model_acc_partseg_best.pth' % (opt.outf))
+                    torch.save(model_pointnet.state_dict(), '%s/acc_partseg_best/pointnet_model.pth' % (opt.outf))
+                    torch.save(model_ges2parts.state_dict(), '%s/acc_partseg_best/contrastive_model.pth' % (opt.outf))
+                    torch.save(model_pars2shape.state_dict(), '%s/acc_partseg_best/parts2pts_model.pth' % (opt.outf))
                     best_partseg_acc = val_acc
 
                 if loss_partseg < min_loss_partseg:
                     print("----------")
                     print("min_loss_partsegを更新（eval）")
-                    torch.save(pointnet_classifier.state_dict(), '%s/pointnet_model_loss_partseg_best.pth' % (opt.outf))
-                    torch.save(sk_parts_classifier.state_dict(), '%s/contrastive_model_loss_partseg_best.pth' % (opt.outf))
-                    torch.save(parts2pts_classifier.state_dict(), '%s/parts2pts_model_loss_partseg_best.pth' % (opt.outf))
+                    torch.save(model_pointnet.state_dict(), '%s/loss_partseg_best/pointnet_model.pth' % (opt.outf))
+                    torch.save(model_ges2parts.state_dict(), '%s/loss_partseg_best/contrastive_model.pth' % (opt.outf))
+                    torch.save(model_pars2shape.state_dict(), '%s/loss_partseg_best/parts2pts_model.pth' % (opt.outf))
                     min_loss_partseg = loss_partseg
 
                 # total loss
                 if loss < min_loss_total:
                     print("----------")
                     print("min_loss_totalを更新（eval）")
-                    torch.save(pointnet_classifier.state_dict(), '%s/pointnet_model_loss_total_best.pth' % (opt.outf))
-                    torch.save(sk_parts_classifier.state_dict(), '%s/contrastive_model_loss_total_best.pth' % (opt.outf))
-                    torch.save(parts2pts_classifier.state_dict(), '%s/parts2pts_model_loss_total_best.pth' % (opt.outf))
+                    torch.save(model_pointnet.state_dict(), '%s/loss_total_best/pointnet_modelt.pth' % (opt.outf))
+                    torch.save(model_ges2parts.state_dict(), '%s/loss_total_best/contrastive_model.pth' % (opt.outf))
+                    torch.save(model_pars2shape.state_dict(), '%s/loss_total_best/parts2pts_model.pth' % (opt.outf))
                     min_loss_total = loss
 
                 # parts-sk accuracy
                 if ps_acc > best_ps_acc:
                     print("----------")
                     print("best_ps_accを更新（eval: {:.2f}%）".format(ps_acc))
-                    torch.save(pointnet_classifier.state_dict(), '%s/pointnet_model_loss_contrastive_best.pth' % (opt.outf))
-                    torch.save(sk_parts_classifier.state_dict(), '%s/contrastive_model_loss_contrastive_best.pth' % (opt.outf))
-                    torch.save(parts2pts_classifier.state_dict(), '%s/parts2pts_model_loss_contrastive_best.pth' % (opt.outf))
+                    torch.save(model_pointnet.state_dict(), '%s/loss_contrastive_best/pointnet_model.pth' % (opt.outf))
+                    torch.save(model_ges2parts.state_dict(), '%s/loss_contrastive_best/contrastive_model.pth' % (opt.outf))
+                    torch.save(model_pars2shape.state_dict(), '%s/loss_contrastive_best/parts2pts_model.pth' % (opt.outf))
                     best_ps_acc = ps_acc
                 
                 # parts2pts accuracy
                 if p2pts_acc > best_p2pts_acc:
                     print("----------")
                     print("best_p2pts_accを更新（eval: {:.2f}%）".format(p2pts_acc*100))
-                    torch.save(pointnet_classifier.state_dict(), '%s/pointnet_model_loss_parts2pts_best.pth' % (opt.outf))
-                    torch.save(sk_parts_classifier.state_dict(), '%s/contrastive_model_loss_parts2pts_best.pth' % (opt.outf))
-                    torch.save(parts2pts_classifier.state_dict(), '%s/parts2pts_model_loss_parts2pts_best.pth' % (opt.outf))
+                    torch.save(model_pointnet.state_dict(), '%s/loss_parts2pts_best/pointnet_model.pth' % (opt.outf))
+                    torch.save(model_ges2parts.state_dict(), '%s/loss_parts2pts_best/contrastive_model.pth' % (opt.outf))
+                    torch.save(model_pars2shape.state_dict(), '%s/loss_parts2pts_best/parts2pts_model.pth' % (opt.outf))
                     best_p2pts_acc = p2pts_acc
                 
                 # loss
@@ -543,6 +541,6 @@ if __name__=="__main__":
 
     print("----------")
     print("学習終了")
-    torch.save(pointnet_classifier.state_dict(), '%s/pointnet_model_final.pth' % (opt.outf))
-    torch.save(sk_parts_classifier.state_dict(), '%s/contrastive_model_final.pth' % (opt.outf))
-    torch.save(parts2pts_classifier.state_dict(), '%s/parts2pts_model_final.pth' % (opt.outf))
+    torch.save(model_pointnet.state_dict(), '%s/final/pointnet_model.pth' % (opt.outf))
+    torch.save(model_ges2parts.state_dict(), '%s/final/contrastive_model.pth' % (opt.outf))
+    torch.save(model_pars2shape.state_dict(), '%s/final/parts2pts_model.pth' % (opt.outf))
