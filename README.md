@@ -23,7 +23,7 @@
 ## プロジェクト構成
 
 ```
-Parts2Gesture/
+root/
 │
 ├── model_Contratstive_Parts2Gesture/              # 学習済みモデルディレクトリ
 │   ├── pointnet_model_*.pth                       # パーツセグメンテーション
